@@ -12,6 +12,7 @@ import pickle
 import base64
 import hashlib
 import subprocess
+import json
 
 app = Flask(__name__)
 
@@ -142,10 +143,11 @@ def comment():
     comments = cursor.fetchall()
     conn.close()
 
-    # VULNERABLE: No output encoding
+    # FIXED: Properly escape user input to prevent XSS
+    from markupsafe import escape
     comments_html = ''
     for user, comment_text in comments:
-        comments_html += f'<div><strong>{user}:</strong> {comment_text}</div>'
+        comments_html += f'<div><strong>{escape(user)}:</strong> {escape(comment_text)}</div>'
 
     return f'''
     <html>
@@ -208,9 +210,13 @@ def view_file():
     filename = request.args.get('name', '')
 
     if filename:
-        # VULNERABLE: No path validation
+        # FIXED: Validate and sanitize the file path
+        safe_dir = os.path.abspath('/safe_directory/')
+        requested_path = os.path.abspath(os.path.join(safe_dir, filename))
+        if not requested_path.startswith(safe_dir):
+            return '<p>Invalid file path.</p><p><a href="/">Back</a></p>'
         try:
-            with open(filename, 'r') as f:
+            with open(requested_path, 'r') as f:
                 content = f.read()
             return f'''
             <html>
@@ -249,9 +255,9 @@ def deserialize():
 
     if data:
         try:
-            # VULNERABLE: Unpickling untrusted data
+            # FIXED: Use JSON instead of pickle for deserialization
             decoded = base64.b64decode(data)
-            obj = pickle.loads(decoded)
+            obj = json.loads(decoded.decode('utf-8'))
             return f'''
             <html>
             <body>
@@ -269,7 +275,7 @@ def deserialize():
         <body>
             <h1>Deserialize Data</h1>
             <form action="/deserialize" method="get">
-                <input type="text" name="data" placeholder="Enter base64 encoded pickle data">
+                <input type="text" name="data" placeholder="Enter base64 encoded JSON data">
                 <input type="submit" value="Deserialize">
             </form>
             <p><a href="/">Back</a></p>
